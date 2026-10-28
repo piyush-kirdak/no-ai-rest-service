@@ -1,109 +1,59 @@
-
 from fastapi import FastAPI, HTTPException, Response, status
-from pydantic import BaseModel
-
+from contextlib import asynccontextmanager
 from database import create_table, get_connection
-
-app = FastAPI(title="No-AI REST Service")
-
-
-class TaskCreate(BaseModel):
-    title: str
-    description: str = ""
-
-
-class TaskUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
-
-
-# Create the database table when the app starts.
-@app.on_event("startup")
-def startup():
+from schemas import TaskCreate, TaskUpdate
+import task_repository
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     create_table()
+    yield
 
+
+app = FastAPI(
+    title="No-AI REST Service",
+    lifespan=lifespan,
+)
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
 
-
 @app.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(task: TaskCreate):
-    connection = get_connection()
-
-    try:
-        cursor = connection.execute(
-            "INSERT INTO tasks (title, description) VALUES (?, ?)",
-            (task.title, task.description),
-        )
-        connection.commit()
-
-        new_task = connection.execute(
-            "SELECT id, title, description FROM tasks WHERE id = ?",
-            (cursor.lastrowid,),
-        ).fetchone()
-
-        return dict(new_task)
-    finally:
-        connection.close()
-
-
+    return task_repository.create_task(
+        title=task.title,
+        description=task.description,
+    )
 @app.get("/tasks")
 def get_tasks():
-    connection = get_connection()
-
-    try:
-        rows = connection.execute(
-            "SELECT id, title, description FROM tasks ORDER BY id"
-        ).fetchall()
-
-        return [dict(row) for row in rows]
-    finally:
-        connection.close()
-
+    return task_repository.get_tasks()
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
-    connection = get_connection()
+    task = task_repository.get_task(task_id)
 
-    try:
-        row = connection.execute(
-            "SELECT id, title, description FROM tasks WHERE id = ?",
-            (task_id,),
-        ).fetchone()
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found",
+        )
 
-        if row is None:
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        return dict(row)
-    finally:
-        connection.close()
+    return task
 
 
 @app.put("/tasks/{task_id}")
 def replace_task(task_id: int, updated_task: TaskCreate):
-    connection = get_connection()
+    task = task_repository.replace_task(
+        task_id=task_id,
+        title=updated_task.title,
+        description=updated_task.description,
+    )
 
-    try:
-        cursor = connection.execute(
-            "UPDATE tasks SET title = ?, description = ? WHERE id = ?",
-            (updated_task.title, updated_task.description, task_id),
-        )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
-        connection.commit()
-
-        row = connection.execute(
-            "SELECT id, title, description FROM tasks WHERE id = ?",
-            (task_id,),
-        ).fetchone()
-
-        return dict(row)
-    finally:
-        connection.close()
 
 
 @app.patch("/tasks/{task_id}")
@@ -123,51 +73,21 @@ def update_task(task_id: int, updates: TaskUpdate):
                 detail=f"{field} cannot be null",
             )
 
-    allowed_fields = {"title", "description"}
-    if not set(changes).issubset(allowed_fields):
-        raise HTTPException(status_code=422, detail="Invalid field")
+    task = task_repository.update_task(task_id, changes)
 
-    connection = get_connection()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    try:
-        exists = connection.execute(
-            "SELECT id FROM tasks WHERE id = ?", (task_id,)
-        ).fetchone()
+    return task
 
-        if exists is None:
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        for field, value in changes.items():
-            connection.execute(
-                f"UPDATE tasks SET {field} = ? WHERE id = ?",
-                (value, task_id),
-            )
-
-        connection.commit()
-
-        row = connection.execute(
-            "SELECT id, title, description FROM tasks WHERE id = ?",
-            (task_id,),
-        ).fetchone()
-
-        return dict(row)
-    finally:
-        connection.close()
-
-
-@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 def delete_task(task_id: int):
-    connection = get_connection()
+    deleted = task_repository.delete_task(task_id)
 
-    try:
-        cursor = connection.execute(
-            "DELETE FROM tasks WHERE id = ?", (task_id,)
-        )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        connection.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    finally:
-        connection.close()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
