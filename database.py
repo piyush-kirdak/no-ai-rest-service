@@ -1,6 +1,11 @@
 import sqlite3
+import os
+import os
+from dotenv import load_dotenv
 
-DATABASE_NAME = "tasks.db"
+load_dotenv()
+
+DATABASE_NAME = os.getenv("DATABASE_NAME", "tasks.db")
 
 
 def get_connection():

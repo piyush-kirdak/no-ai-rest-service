@@ -35,16 +35,20 @@ def get_tasks() -> list[dict]:
         connection.close()
 
 
-def get_task(task_id: int) -> dict | None:
+def get_tasks(skip: int = 0, limit: int = 10) -> list[dict]:
     connection = get_connection()
-
     try:
-        row = connection.execute(
-            "SELECT id, title, description FROM tasks WHERE id = ?",
-            (task_id,),
-        ).fetchone()
+        rows = connection.execute(
+            """
+            SELECT id, title, description
+            FROM tasks
+            ORDER BY id
+            LIMIT ? OFFSET ?
+            """,
+            (limit, skip),
+        ).fetchall()
 
-        return dict(row) if row is not None else None
+        return [dict(row) for row in rows]
     finally:
         connection.close()
 
@@ -105,6 +109,17 @@ def update_task(task_id: int, changes: dict) -> dict | None:
     finally:
         connection.close()
 
+def get_task(task_id: int) -> dict | None:
+    connection = get_connection()
+    try:
+        row = connection.execute(
+            "SELECT id, title, description FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+
+        return dict(row) if row is not None else None
+    finally:
+        connection.close()
 
 def delete_task(task_id: int) -> bool:
     connection = get_connection()
