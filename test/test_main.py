@@ -1,9 +1,9 @@
-
 import pytest
-import database
 
 from fastapi.testclient import TestClient
-from main import app
+
+from backend import database
+from backend.main import app
 
 
 @pytest.fixture

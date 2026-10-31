@@ -1,5 +1,4 @@
-from security import create_access_token, verify_access_token
-
+from backend.security import create_access_token, verify_access_token
 
 def test_token_creation_and_verification():
     user_id = 123

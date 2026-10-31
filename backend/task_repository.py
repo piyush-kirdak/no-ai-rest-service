@@ -1,10 +1,9 @@
 
-from database import get_connection
+from backend.database import get_connection
 
 
 def create_task(title: str, description: str) -> dict:
     connection = get_connection()
-
     try:
         cursor = connection.execute(
             "INSERT INTO tasks (title, description) VALUES (?, ?)",
@@ -18,19 +17,11 @@ def create_task(title: str, description: str) -> dict:
         ).fetchone()
 
         return dict(row)
-    finally:
-        connection.close()
 
+    except Exception:
+        connection.rollback()
+        raise
 
-def get_tasks() -> list[dict]:
-    connection = get_connection()
-
-    try:
-        rows = connection.execute(
-            "SELECT id, title, description FROM tasks ORDER BY id"
-        ).fetchall()
-
-        return [dict(row) for row in rows]
     finally:
         connection.close()
 
