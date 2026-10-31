@@ -1,9 +1,17 @@
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Response, status ,Depends
 from fastapi import Query, Path
 from contextlib import asynccontextmanager
 from database import create_table, get_connection
-from schemas import TaskCreate, TaskUpdate,TaskRead
+from schemas import TaskCreate, TaskUpdate,TaskRead, UserLogin , TokenResponse
 import task_repository
+from pwdlib import PasswordHash
+from schemas import UserCreate, UserResponse
+import user_repository
+from security import create_access_token
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from security import create_access_token, verify_access_token
+# password hasher initialize
+password_hash = PasswordHash.recommended()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_table()
@@ -15,9 +23,86 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+bearer_scheme = HTTPBearer()
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    token = credentials.credentials
+
+    try:
+        user_id = verify_access_token(token)
+
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = user_repository.get_user_by_id(user_id)
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+@app.post(
+    "/auth/register",
+    status_code=status.HTTP_201_CREATED,
+    response_model=UserResponse,
+)
+def register_user(user: UserCreate):
+
+    hashed_password = password_hash.hash(user.password)
+
+    try:
+        new_user = user_repository.create_user(
+            name=user.name,
+            email=user.email,
+            hashed_password=hashed_password,
+        )
+
+        return new_user
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        )
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login_user(credentials: UserLogin):
+
+    user = user_repository.get_user_by_email(credentials.email)
+
+    if user is None or not password_hash.verify(
+        credentials.password,
+        user["hashed_password"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    access_token = create_access_token(user["id"])
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+@app.get("/users/me", response_model=UserResponse)
+def read_current_user(
+    current_user: dict = Depends(get_current_user),
+):
+    return current_user
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED,
     response_model=TaskRead,)
